@@ -6,6 +6,7 @@
     python3 tizen/build.py --preview       # also leaves the files in out/tizen/ to open index.html in a browser
     python3 tizen/build.py --config other.properties
     python3 tizen/build.py --generic       # without config.properties: the TV's time zone picks the city (releases)
+    python3 tizen/build.py --generic --autostart --sign PROFILE  # TV-local autostart, requires a Partner certificate
 
 The same home screen as on LG (web/), with tizen/config.xml and tizen/icon.png, in a zip as Tizen Studio makes it.
 TVs only install signed packages. TizenBrew Installer signs it with the person's Samsung certificate on 2023 and
@@ -60,7 +61,7 @@ def sign(profile):
         sys.exit('The package came back without its signatures.')
 
 
-def build(preview, config, profile):
+def build(preview, config, profile, autostart=False):
     with open(os.path.join(ROOT, 'tizen', 'config.xml'), encoding='utf-8') as f:
         manifest = f.read()
     app_id = re.search(r'<tizen:application id="([^"]+)"', manifest).group(1)
@@ -69,6 +70,20 @@ def build(preview, config, profile):
     for name in ('config.xml', 'icon.png'):
         with open(os.path.join(ROOT, 'tizen', name), 'rb') as f:
             app[name] = f.read()
+
+    if autostart:
+        # Only opt-in builds require a Web Service and a device-bound Partner distributor certificate.
+        package = app_id.split('.')[0]
+        service = ('    <tizen:service id="%s.Autostart" on-boot="true">\n'
+                   '        <tizen:content src="autostart.js"/>\n'
+                   '        <tizen:name>Autostart</tizen:name>\n'
+                   '        <tizen:description>Open Free My TV when the TV is switched on</tizen:description>\n'
+                   '    </tizen:service>\n') % package
+        manifest = manifest.replace('    <access origin=', '    <feature name="http://tizen.org/feature/web.service"/>\n'
+                                    '    <access origin=', 1).replace('    <tizen:setting ', service + '    <tizen:setting ', 1)
+        app['config.xml'] = manifest.encode('utf-8')
+        with open(os.path.join(ROOT, 'tizen', 'autostart.js'), 'rb') as f:
+            app['autostart.js'] = f.read().replace(b'__APP_ID__', app_id.encode('ascii'))
 
     with zipfile.ZipFile(WGT, 'w', zipfile.ZIP_DEFLATED) as z:
         for path in sorted(app):
@@ -88,4 +103,4 @@ def build(preview, config, profile):
 if __name__ == '__main__':
     args = sys.argv[1:]
     profile = args[args.index('--sign') + 1] if '--sign' in args else None
-    build('--preview' in args, webapp.config_from_args(args), profile)
+    build('--preview' in args, webapp.config_from_args(args), profile, '--autostart' in args)
