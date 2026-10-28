@@ -29,6 +29,8 @@ final class Prefs {
     static final int KEY_KTC_TABII = KeyEvent.KEYCODE_BUTTON_8;
     /** Xiaomi's Mi button: BUTTON_4, which the TV hands to its GlobalKeyReceiver for PatchWall (its log: "keyCode = 191"). */
     static final int KEY_MI = KeyEvent.KEYCODE_BUTTON_4;
+    /** Xiaomi's PatchWall button: BUTTON_5, which the TV hands to the same receiver to open PatchWall (its log: "192"). */
+    static final int KEY_XIAOMI_PATCHWALL = KeyEvent.KEYCODE_BUTTON_5;
     /** Sony's app buttons, as SONY_KEY + scan code (read from a BRAVIA's log; the key codes are shared). */
     static final int SONY_KEY = 100_000;
     static final int KEY_SONY_CORE = SONY_KEY + 496, KEY_SONY_NETFLIX = SONY_KEY + 583, KEY_SONY_DISNEY = SONY_KEY + 491,
@@ -57,8 +59,8 @@ final class Prefs {
                     KEY_SONY_PLAY}
             : RemoteKeys.STEM_NETFLIX ? new int[] {KEY_STEM_NETFLIX}
             : RemoteKeys.KTC ? new int[] {KEY_KTC_TABII}
-            : RemoteKeys.XIAOMI ? new int[] {KEY_MI, KEY_XIAOMI_OKKO, KEY_XIAOMI_VK, KEY_XIAOMI_RUTUBE, KEY_XIAOMI_KION,
-                    KEY_XIAOMI_WINK, KEY_XIAOMI_IVI}
+            : RemoteKeys.XIAOMI ? new int[] {KEY_MI, KEY_YOUTUBE, KEY_XIAOMI_PATCHWALL, KEY_XIAOMI_OKKO, KEY_XIAOMI_VK,
+                    KEY_XIAOMI_RUTUBE, KEY_XIAOMI_KION, KEY_XIAOMI_WINK, KEY_XIAOMI_IVI}
             : new int[] {KEY_NETFLIX, KEY_YOUTUBE, KEY_PRIME, KEY_TCL_CHANNEL};
 
     /** Bumped by every change: screens compare it to know when to redraw. */
@@ -103,6 +105,11 @@ final class Prefs {
         version++;
     }
 
+    private static void put(String key, int value) {
+        sp().edit().putInt(key, value).apply();
+        version++;
+    }
+
     private static void put(String key, boolean value) {
         sp().edit().putBoolean(key, value).apply();
         version++;
@@ -127,6 +134,46 @@ final class Prefs {
 
     static void setTemperature(String v) { put("temperature", v); }
 
+    /** Picks per tab on the home screen: 3 (as it always was) up to Recs.MAX_CARDS. */
+    static int cards() {
+        return Math.max(3, Math.min(Recs.MAX_CARDS, sp().getInt("cards", 3)));
+    }
+
+    static void setCards(int n) { put("cards", n); }
+
+    // MARK: - Picks from
+
+    private static String offList;
+    private static int offListAt = -1;
+
+    /** The services (Recs' keys: "netflix", "prime"...) whose titles are left out of the picks, as ",a,b,". */
+    private static String offServices() {
+        if (offList == null || offListAt != version) {
+            String saved = sp().getString("servicesOff", null);
+            if (saved == null) {   // not chosen on the TV yet: what hide_services says
+                StringBuilder first = new StringBuilder();
+                for (String key : Config.HIDE_SERVICES.split(",")) {
+                    key = key.trim().toLowerCase(Locale.ROOT);
+                    if (!key.isEmpty()) first.append(first.length() > 0 ? "," : "").append(key);
+                }
+                saved = first.toString();
+            }
+            offList = saved.isEmpty() ? "," : "," + saved + ",";
+            offListAt = version;
+        }
+        return offList;
+    }
+
+    static boolean serviceOff(String key) {
+        return key != null && offServices().contains("," + key + ",");
+    }
+
+    static void setServiceOff(String key, boolean off) {
+        String list = offServices();
+        list = off ? (serviceOff(key) ? list : list + key + ",") : list.replace("," + key + ",", ",");
+        put("servicesOff", list.length() > 1 ? list.substring(1, list.length() - 1) : "");
+    }
+
     /** "auto" (dark from sunset to sunrise), "light" or "dark". */
     static String theme() {
         String v = sp().getString("theme", Config.THEME.trim());
@@ -150,6 +197,10 @@ final class Prefs {
     static boolean sounds() { return sp().getBoolean("sounds", true); }
     static void setSounds(boolean on) { put("sounds", on); }
 
+    /** OK on the screensaver opens the title it shows, in its app; any other key only closes it. Off: any key closes it. */
+    static boolean saverWatch() { return sp().getBoolean("saverWatch", false); }
+    static void setSaverWatch(boolean on) { put("saverWatch", on); }
+
     // MARK: - Widgets and coins
 
     static boolean weather() { return sp().getBoolean("weather", true); }
@@ -157,6 +208,12 @@ final class Prefs {
     /** The weather card's forecast: "hours" (the next 6 hours) or "days" (the next 5 days). */
     static String forecast() { return "days".equals(sp().getString("forecast", "hours")) ? "days" : "hours"; }
     static void setForecast(String v) { put("forecast", v); }
+
+    static boolean nowPlaying() { return sp().getBoolean("nowPlaying", false); }
+    static void setNowPlaying(boolean on) {   // committed: the main process reads it right away to allow the listener
+        sp().edit().putBoolean("nowPlaying", on).commit();
+        version++;
+    }
 
     static boolean quotes() { return sp().getBoolean("quotes", Config.SHOW_CRYPTO); }
     static void setQuotes(boolean on) { put("quotes", on); }
@@ -167,6 +224,19 @@ final class Prefs {
 
     static boolean coin(int i) { return sp().getBoolean("coin" + i, true); }
     static void setCoin(int i, boolean on) { put("coin" + i, on); }
+
+    // MARK: - TMDB key
+
+    /**
+     * The TMDB key given on the TV (Home Settings > TMDB key: from a phone, or typed), or "": then config.properties'
+     * one (Recs.key). Never logged.
+     */
+    static String tmdbKey() { return app == null ? "" : sp().getString("tmdbKey", "").trim(); }
+
+    static void setTmdbKey(String key) {   // committed: ScreensaverAlone reads it from the main process
+        sp().edit().putString("tmdbKey", key).commit();
+        version++;
+    }
 
     // MARK: - Shelf
 
